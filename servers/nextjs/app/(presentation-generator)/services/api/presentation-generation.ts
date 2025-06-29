@@ -339,6 +339,29 @@ export class PresentationGenerationApi {
       throw error;
     }
   }
+
+  static async exportAsPPTXWithTemplate(formData: FormData) {
+    try {
+      const response = await fetch(
+        `/api/v1/ppt/presentation/export_as_pptx`, // Same endpoint, backend will handle FormData or JSON
+        {
+          method: "POST",
+          headers: getHeaderForFormData(), // Use FormData headers
+          body: formData,
+          cache: "no-cache",
+        }
+      );
+      if (response.ok) {
+        return await response.json();
+      } else {
+        throw new Error(`Failed to export as pptx with template: ${response.statusText}`);
+      }
+    } catch (error) {
+      console.error("error in pptx export with template", error);
+      throw error;
+    }
+  }
+
   static async exportAsPDF(presentationData: any) {
     try {
       const response = await fetch(

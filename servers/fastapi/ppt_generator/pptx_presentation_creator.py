@@ -14,6 +14,7 @@ from pptx.enum.chart import (
     XL_LEGEND_POSITION,
     XL_LABEL_POSITION,
 )
+from pptx.enum.shapes import PP_PLACEHOLDER, MSO_SHAPE_TYPE
 from pptx.opc.constants import RELATIONSHIP_TYPE as RT
 from lxml.etree import fromstring, tostring
 from PIL import Image
@@ -58,7 +59,7 @@ BLANK_SLIDE_LAYOUT = 6
 
 class PptxPresentationCreator:
 
-    def __init__(self, ppt_model: PptxPresentationModel, temp_dir: str):
+    def __init__(self, ppt_model: PptxPresentationModel, temp_dir: str, template_path: Optional[str] = None):
         self._temp_dir = temp_dir
 
         self._ppt_model = ppt_model
@@ -66,46 +67,78 @@ class PptxPresentationCreator:
         # self._theme = ppt_model.theme
         # self._watermark = ppt_model.watermark
 
-        self._ppt = Presentation()
+        if template_path:
+            try:
+                self._ppt = Presentation(template_path)
+            except Exception as e:
+                print(f"Error loading template: {e}. Creating a new presentation instead.")
+                self._ppt = Presentation()
+        else:
+            self._ppt = Presentation()
+
         self._ppt.slide_width = Pt(1280)
         self._ppt.slide_height = Pt(720)
 
         self._slide_fill = PptxFillModel(color=ppt_model.background_color)
 
     def create_ppt(self):
-        # self.set_presentation_theme()
+        # if not self._ppt.template: # Only set theme if not using a template
+            # self.set_presentation_theme() # Commented out as it conflicts with template themes
 
-        for slide_model in self._slide_models:
+        for i, slide_model in enumerate(self._slide_models):
             # Adding global shapes to slide
             if self._ppt_model.shapes:
                 slide_model.shapes.append(self._ppt_model.shapes)
 
-            self.add_and_populate_slide(slide_model)
+            self.add_and_populate_slide(slide_model, i)
 
-    def set_presentation_theme(self):
-        slide_master = self._ppt.slide_master
-        slide_master_part = slide_master.part
+    # def set_presentation_theme(self):
+    #     # This method is likely to conflict with user-provided templates.
+    #     # Styles should primarily come from the template's slide masters.
+    #     slide_master = self._ppt.slide_master
+    #     slide_master_part = slide_master.part
 
-        theme_part = slide_master_part.part_related_by(RT.THEME)
-        theme = fromstring(theme_part.blob)
+    #     theme_part = slide_master_part.part_related_by(RT.THEME)
+    #     theme = fromstring(theme_part.blob)
 
-        theme_colors = self._theme.colors.theme_color_mapping
-        nsmap = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
+    #     theme_colors = self._theme.colors.theme_color_mapping
+    #     nsmap = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
 
-        for color_name, hex_value in theme_colors.items():
-            if color_name:
-                color_element = theme.xpath(
-                    f"a:themeElements/a:clrScheme/a:{color_name}/a:srgbClr",
-                    namespaces=nsmap,
-                )[0]
-                color_element.set("val", hex_value.encode("utf-8"))
+    #     for color_name, hex_value in theme_colors.items():
+    #         if color_name:
+    #             color_element = theme.xpath(
+    #                 f"a:themeElements/a:clrScheme/a:{color_name}/a:srgbClr",
+    #                 namespaces=nsmap,
+    #             )[0]
+    #             color_element.set("val", hex_value.encode("utf-8"))
 
-        theme_part._blob = tostring(theme)
+    #     theme_part._blob = tostring(theme)
 
-    def add_and_populate_slide(self, slide_model: PptxSlideModel):
-        slide = self._ppt.slides.add_slide(self._ppt.slide_layouts[BLANK_SLIDE_LAYOUT])
+    def add_and_populate_slide(self, slide_model: PptxSlideModel, slide_index: int):
+        slide_layout_index_to_try = slide_index  # Temporary: using slide index to pick layout
 
-        if self._slide_fill:
+        # Try to use the layout from the template, fallback to BLANK_SLIDE_LAYOUT
+        try:
+            if slide_layout_index_to_try < len(self._ppt.slide_layouts):
+                slide_layout = self._ppt.slide_layouts[slide_layout_index_to_try]
+            else:
+                # Fallback if index is out of bounds for the template's layouts
+                print(f"Warning: Layout index {slide_layout_index_to_try} out of bounds. Falling back to blank layout.")
+                slide_layout = self._ppt.slide_layouts[BLANK_SLIDE_LAYOUT]
+        except IndexError:
+            # Fallback if BLANK_SLIDE_LAYOUT itself is not found (highly unlikely with default pptx)
+             print(f"Warning: BLANK_SLIDE_LAYOUT (index {BLANK_SLIDE_LAYOUT}) not found. Using first available layout.")
+             if len(self._ppt.slide_layouts) > 0:
+                slide_layout = self._ppt.slide_layouts[0]
+             else:
+                # This case should ideally not happen if a presentation object exists.
+                # If it does, we might need to create a truly blank slide or raise an error.
+                # For now, re-raising to highlight a critical issue.
+                raise ValueError("No slide layouts available in the presentation.")
+
+        slide = self._ppt.slides.add_slide(slide_layout)
+
+        if self._slide_fill and not self._ppt.template: # Only apply background fill if not using a template
             self.apply_fill_to_shape(slide.background, self._slide_fill)
 
         for shape_model in slide_model.shapes:
@@ -165,10 +198,29 @@ class PptxPresentationCreator:
                 chart_type = XL_CHART_TYPE.PIE
 
         if chart_data:
-            chart: Chart = slide.shapes.add_chart(
-                chart_type, *graph_box_model.position.to_pt_list(), chart_data
-            ).chart
-            self.apply_graph_styles(chart, graph_box_model)
+            populated_placeholder = False
+            for placeholder in slide.placeholders:
+                if placeholder.placeholder_format.type == PP_PLACEHOLDER.CHART or \
+                   placeholder.placeholder_format.type == PP_PLACEHOLDER.OBJECT or \
+                   placeholder.placeholder_format.type == PP_PLACEHOLDER.CONTENT: # Content can also hold charts
+                    try:
+                        if placeholder.shape_type == MSO_SHAPE_TYPE.PLACEHOLDER: # Ensure it's a placeholder
+                            # Using insert_chart method for placeholders
+                            graphic_frame = placeholder.insert_chart(chart_type, chart_data)
+                            chart = graphic_frame.chart
+                            self.apply_graph_styles(chart, graph_box_model)
+                            populated_placeholder = True
+                            break
+                    except Exception as e:
+                        print(f"Could not insert chart into placeholder: {e}")
+
+            if not populated_placeholder:
+                print(f"Warning: Could not find suitable placeholder for chart. Adding as new shape. Type: {graph.type}")
+                # Fallback to original behavior
+                chart: Chart = slide.shapes.add_chart(
+                    chart_type, *graph_box_model.position.to_pt_list(), chart_data
+                ).chart
+                self.apply_graph_styles(chart, graph_box_model)
 
     def apply_graph_styles(self, chart, graph_box_model: PptxGraphBoxModel):
         graph = graph_box_model.graph
@@ -304,7 +356,29 @@ class PptxPresentationCreator:
             picture_model.position, picture_model.margin
         )
 
-        slide.shapes.add_picture(image_path, *margined_position.to_pt_list())
+        # Try to find and populate a picture placeholder
+        populated_placeholder = False
+        for placeholder in slide.placeholders:
+            if placeholder.name.lower().startswith("picture") or \
+               placeholder.placeholder_format.type == PP_PLACEHOLDER.PICTURE:
+                try:
+                    # Ensure placeholder is empty or can be replaced
+                    # Some placeholders might not be directly insertable or might have content
+                    if placeholder.shape_type == MSO_SHAPE_TYPE.PLACEHOLDER: # Check if it's a placeholder type
+                        placeholder = placeholder.insert_picture(image_path)
+                        populated_placeholder = True
+                        # TODO: Apply object_fit, border_radius etc. to the placeholder if possible.
+                        # This is more complex as placeholders behave differently than regular shapes.
+                        # For now, we rely on template styling for picture placeholders.
+                        break
+                except Exception as e:
+                    print(f"Could not insert picture into placeholder: {e}")
+
+        if not populated_placeholder:
+            print(f"Warning: Could not find a suitable empty placeholder for picture. Adding as new shape. Image: {image_path}")
+            # Fallback to original behavior if no suitable placeholder is found
+            slide.shapes.add_picture(image_path, *margined_position.to_pt_list())
+
 
     def add_autoshape(self, slide: Slide, autoshape_box_model: PptxAutoShapeBoxModel):
         position = autoshape_box_model.position
@@ -326,18 +400,98 @@ class PptxPresentationCreator:
 
         if autoshape_box_model.paragraphs:
             self.add_paragraphs(textbox, autoshape_box_model.paragraphs)
+        # If the autoshape has text, try to populate a text placeholder if available
+        # This is a basic attempt and might need refinement
+        if autoshape_box_model.paragraphs:
+            text_placeholder_used_for_autoshape = False
+            for placeholder in slide.placeholders:
+                is_text_placeholder = placeholder.name.lower().startswith("body") or \
+                                   placeholder.name.lower().startswith("content") or \
+                                   placeholder.name.lower().startswith("text") or \
+                                   placeholder.placeholder_format.type == PP_PLACEHOLDER.BODY or \
+                                   placeholder.placeholder_format.type == PP_PLACEHOLDER.CONTENT or \
+                                   placeholder.placeholder_format.type == PP_PLACEHOLDER.OBJECT
+                if is_text_placeholder and (not placeholder.has_text_frame or placeholder.text_frame.text == ""):
+                    # Check if this placeholder was already used by add_textbox (this is tricky without more state)
+                    # For now, we assume if it's empty, it's available.
+                    text_frame = placeholder.text_frame
+                    text_frame.clear()
+                    text_frame.word_wrap = autoshape_box_model.text_wrap
+                    self.apply_margin_to_text_box(text_frame, autoshape_box_model.margin) # Apply margin from autoshape model
+                    self.add_paragraphs(text_frame, autoshape_box_model.paragraphs)
+                    text_placeholder_used_for_autoshape = True
+
+                    # Make the original autoshape invisible or very small if its text is moved
+                    # This prevents text duplication.
+                    autoshape.width = Pt(1)
+                    autoshape.height = Pt(1)
+                    autoshape.fill.background() # Make it transparent
+                    autoshape.line.fill.background() # No border
+                    break
+            if not text_placeholder_used_for_autoshape:
+                 # If no placeholder was found for the text, the text remains in the autoshape as originally designed.
+                pass
+
 
     def add_textbox(self, slide: Slide, textbox_model: PptxTextBoxModel):
-        position = textbox_model.position
-        textbox_shape = slide.shapes.add_textbox(*position.to_pt_list())
-        textbox_shape.width += Pt(2)
+        populated_placeholder = False
+        # Attempt to find and populate a body placeholder
+        for placeholder in slide.placeholders:
+            if placeholder.name.lower().startswith("body") or \
+               placeholder.name.lower().startswith("content") or \
+               placeholder.name.lower().startswith("text") or \
+               placeholder.placeholder_format.type == PP_PLACEHOLDER.BODY or \
+               placeholder.placeholder_format.type == PP_PLACEHOLDER.CONTENT or \
+               placeholder.placeholder_format.type == PP_PLACEHOLDER.OBJECT: # OBJECT can also hold text
+                if not placeholder.has_text_frame or placeholder.text_frame.text == "":
+                    textbox = placeholder.text_frame
+                    textbox.clear() # Clear any default text
+                    textbox.word_wrap = textbox_model.text_wrap
+                    # self.apply_fill_to_shape(placeholder.shape, textbox_model.fill) # Placeholder fill usually from template
+                    self.apply_margin_to_text_box(textbox, textbox_model.margin)
+                    self.add_paragraphs(textbox, textbox_model.paragraphs)
+                    populated_placeholder = True
+                    # Mark this placeholder as used (conceptually - actual tracking is complex)
+                    # For simplicity, we assume if it's filled now, it's "used" for this textbox_model
+                    break
 
-        textbox = textbox_shape.text_frame
-        textbox.word_wrap = textbox_model.text_wrap
+        if not populated_placeholder:
+            # Fallback: If no suitable placeholder is found or if all are filled,
+            # try to find a title placeholder if it's a short text.
+            is_likely_title = len(textbox_model.paragraphs) == 1 and \
+                              textbox_model.paragraphs[0].text_runs and \
+                              len(textbox_model.paragraphs[0].text_runs) == 1 and \
+                              len(textbox_model.paragraphs[0].text_runs[0].text) < 100
 
-        self.apply_fill_to_shape(textbox_shape, textbox_model.fill)
-        self.apply_margin_to_text_box(textbox, textbox_model.margin)
-        self.add_paragraphs(textbox, textbox_model.paragraphs)
+            if is_likely_title:
+                for placeholder in slide.placeholders:
+                    if placeholder.name.lower().startswith("title") or \
+                       placeholder.placeholder_format.type == PP_PLACEHOLDER.TITLE or \
+                       placeholder.placeholder_format.type == PP_PLACEHOLDER.CENTER_TITLE:
+                        if not placeholder.has_text_frame or placeholder.text_frame.text == "":
+                            textbox = placeholder.text_frame
+                            textbox.clear()
+                            textbox.word_wrap = textbox_model.text_wrap
+                            self.add_paragraphs(textbox, textbox_model.paragraphs)
+                            populated_placeholder = True
+                            break
+
+            if not populated_placeholder:
+                # Only print warning if there was actual text to add.
+                has_text_to_add = any(p.text_runs and any(tr.text for tr in p.text_runs) for p in textbox_model.paragraphs)
+                if has_text_to_add:
+                    print(f"Warning: Could not find a suitable empty placeholder for textbox. Text: '{textbox_model.paragraphs[0].text_runs[0].text[:50]}...'")
+                # Original behavior (creating a new textbox) is commented out to prioritize template placeholders.
+                # If needed, this fallback can be reinstated.
+                # position = textbox_model.position
+                # textbox_shape = slide.shapes.add_textbox(*position.to_pt_list())
+                # textbox_shape.width += Pt(2)
+                # textbox = textbox_shape.text_frame
+                # textbox.word_wrap = textbox_model.text_wrap
+                # self.apply_fill_to_shape(textbox_shape, textbox_model.fill)
+                # self.apply_margin_to_text_box(textbox, textbox_model.margin)
+                # self.add_paragraphs(textbox, textbox_model.paragraphs)
+
 
     def add_paragraphs(
         self, textbox: TextFrame, paragraph_models: List[PptxParagraphModel]
@@ -458,6 +612,14 @@ class PptxPresentationCreator:
             print("Could not apply border radius.")
 
     def apply_fill_to_shape(self, shape: Shape, fill: Optional[PptxFillModel] = None):
+        if self._ppt.template: # If using a template, prefer template styles
+            if fill : # Only apply if a specific fill is requested, could be an override
+                print(f"Note: Applying explicit fill color {fill.color} even with template.")
+                shape.fill.solid()
+                shape.fill.fore_color.rgb = RGBColor.from_string(fill.color)
+            # else, do nothing, let template style prevail
+            return
+
         if not fill:
             shape.fill.background()
         else:
@@ -467,6 +629,15 @@ class PptxPresentationCreator:
     def apply_stroke_to_shape(
         self, shape: Shape, stroke: Optional[PptxStrokeModel] = None
     ):
+        if self._ppt.template: # If using a template, prefer template styles
+            if stroke and stroke.thickness > 0: # Only apply if a specific stroke is requested
+                print(f"Note: Applying explicit stroke even with template.")
+                shape.line.fill.solid()
+                shape.line.fill.fore_color.rgb = RGBColor.from_string(stroke.color)
+                shape.line.width = Pt(stroke.thickness)
+            # else, do nothing, let template style prevail
+            return
+
         if not stroke or stroke.thickness == 0:
             shape.line.fill.background()
         else:
@@ -477,6 +648,8 @@ class PptxPresentationCreator:
     def apply_shadow_to_shape(
         self, shape: Shape, shadow: Optional[PptxShadowModel] = None
     ):
+        if self._ppt.template and not shadow: # If using a template and no explicit shadow, prefer template
+            return
 
         # Access the XML for the shape
         sp_element = shape._element
@@ -556,6 +729,19 @@ class PptxPresentationCreator:
         self.apply_font(paragraph.font, font)
 
     def apply_font(self, font: Font, font_model: PptxFontModel):
+        if self._ppt.template: # If using a template, prefer template font styles
+            # Potentially allow overrides if font_model has very specific non-default values
+            # For now, primarily rely on template. Could add verbose logging for overrides.
+            if font_model.name != "Inter" or font_model.color != "000000" or font_model.size != 16: # Example: if model requests specific non-default font
+                 print(f"Note: Applying specific font model ({font_model.name}, {font_model.size}pt, {font_model.color}) even with template.")
+                 font.name = font_model.name
+                 font.color.rgb = RGBColor.from_string(font_model.color)
+                 font.bold = font_model.bold
+                 font.italic = font_model.italic
+                 font.size = Pt(font_model.size)
+            # else, do nothing, let template style prevail for this run/paragraph.
+            return
+
         font.name = font_model.name
         font.color.rgb = RGBColor.from_string(font_model.color)
         font.bold = font_model.bold

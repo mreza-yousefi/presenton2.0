@@ -18,7 +18,35 @@
 * ✅ **Privacy-First** — No tracking, no data stored by us
 * ✅ **Flexible** — Generate presentations from prompts or outlines
 * ✅ **Export Ready** — Save as PowerPoint (PPTX) and PDF
+* ✅ **Custom PPTX Templates** — Use your own `.pptx` file as a template for styling.
 * ✅ **Fully Open-Source** — Apache 2.0 licensed
+
+## Using Custom PPTX Templates
+
+You can now use your own `.pptx` file as a template for generating presentations. This allows you to define specific slide masters, layouts, fonts, colors, and other styling elements that Presenton will use.
+
+**How it works:**
+
+1.  **Prepare your template:**
+    *   Create a `.pptx` file with the desired slide masters and layouts.
+    *   Define fonts, colors, and placeholder styles within your template's slide masters.
+    *   Presenton will attempt to map generated content (titles, text, images, charts) to the placeholders in your template's layouts. It primarily looks for standard placeholder types (Title, Content, Picture, Chart).
+    *   The slide layouts in your template will be used sequentially for the generated slides if possible. For more precise control, ensure your template has a variety of layouts.
+
+2.  **Upload your template:**
+    *   When you are ready to export your presentation as a PPTX file, you will see an option to "Use PPTX Template (Optional)".
+    *   Click the file input to select your prepared `.pptx` template file from your computer.
+
+3.  **Export:**
+    *   Click "Export as PPTX".
+    *   The generated presentation will now use the layouts and styling from your uploaded template.
+
+**Tips for creating templates:**
+
+*   **Use Standard Placeholders:** While Presenton tries to be flexible, using standard placeholder types (Title, Content Body, Picture, Chart, etc.) in your slide layouts will yield the best results.
+*   **Define Styles in Slide Masters:** Set your default font styles, colors, and background designs in the Slide Master view of your PowerPoint template.
+*   **Variety of Layouts:** Include a variety of slide layouts in your template to accommodate different types of content. The system currently uses a simple sequential approach to pick layouts from your template for the generated slides.
+*   **Test Iteratively:** Create a simple template first, test it, and then add more complexity as needed.
 
 ## Running Presenton Docker
 

@@ -304,11 +304,32 @@ async def search_icon(data: SearchIconRequest):
 @presentation_router.post(
     "/presentation/export_as_pptx", response_model=PresentationAndPath
 )
-async def export_as_pptx(data: ExportAsRequest):
+async def export_as_pptx(
+    presentation_id: str = Form(...),
+    pptx_model: str = Form(...), # Will be JSON string, parsed in handler
+    template_file: Optional[UploadFile] = File(None),
+):
+    from ppt_generator.models.pptx_models import PptxPresentationModel # Delayed import for model parsing
+
     request_utils = RequestUtils(f"{route_prefix}/presentation/export_as_pptx")
     logging_service, log_metadata = await request_utils.initialize_logger(
-        presentation_id=data.presentation_id,
+        presentation_id=presentation_id,
     )
+
+    # Manually construct the ExportAsRequest model after parsing pptx_model string
+    try:
+        parsed_pptx_model = PptxPresentationModel.model_validate_json(pptx_model)
+        data = ExportAsRequest(
+            presentation_id=presentation_id,
+            pptx_model=parsed_pptx_model,
+            template_file=template_file,
+        )
+    except Exception as e:
+        # Handle Pydantic validation error or JSON decode error
+        logging_service.logger.error(f"Error parsing pptx_model: {e}", extra=log_metadata.model_dump())
+        # Consider raising HTTPException here
+        raise ValueError(f"Invalid pptx_model format: {e}")
+
     return await handle_errors(
         ExportAsPptxHandler(data).post, logging_service, log_metadata
     )

@@ -20,6 +20,7 @@ class ExportAsPptxHandler(FetchPresentationAssetsMixin):
 
     def __init__(self, data: ExportAsRequest):
         self.data = data
+        self.template_file_path: Optional[str] = None
 
         self.session = str(uuid.uuid4())
         self.temp_dir = TEMP_FILE_SERVICE.create_temp_dir(self.session)
@@ -30,10 +31,28 @@ class ExportAsPptxHandler(FetchPresentationAssetsMixin):
         TEMP_FILE_SERVICE.cleanup_temp_dir(self.temp_dir)
 
     async def post(self, logging_service: LoggingService, log_metadata: LogMetadata):
+        # Log data excluding file content for brevity
+        loggable_data = self.data.model_dump(mode="json", exclude={'template_file'})
+        if self.data.template_file:
+            loggable_data['template_file_name'] = self.data.template_file.filename
         logging_service.logger.info(
-            logging_service.message(self.data.model_dump(mode="json")),
+            logging_service.message(loggable_data),
             extra=log_metadata.model_dump(),
         )
+
+        template_path_for_creator = None
+        if self.data.template_file:
+            try:
+                # Save uploaded template to a temporary file
+                self.template_file_path = os.path.join(self.temp_dir, f"user_template_{uuid.uuid4()}.pptx")
+                with open(self.template_file_path, "wb") as buffer:
+                    buffer.write(await self.data.template_file.read())
+                template_path_for_creator = self.template_file_path
+                logging_service.logger.info(f"User template saved to: {template_path_for_creator}")
+            except Exception as e:
+                logging_service.logger.error(f"Error saving uploaded template: {e}", extra=log_metadata.model_dump())
+                # Optionally, decide if to proceed without template or raise error
+                # For now, proceeding without template if save fails
 
         await self.fetch_presentation_assets()
 
@@ -46,7 +65,11 @@ class ExportAsPptxHandler(FetchPresentationAssetsMixin):
             self.presentation_dir,
             sanitize_filename(f"{presentation.title}.pptx")
         )
-        ppt_creator = PptxPresentationCreator(self.data.pptx_model, self.temp_dir)
+        ppt_creator = PptxPresentationCreator(
+            self.data.pptx_model,
+            self.temp_dir,
+            template_path=template_path_for_creator
+        )
         ppt_creator.create_ppt()
         ppt_creator.save(ppt_path)
 

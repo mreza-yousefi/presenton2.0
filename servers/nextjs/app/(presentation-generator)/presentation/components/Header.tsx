@@ -59,6 +59,7 @@ const Header = ({
   const [open, setOpen] = useState(false);
   const [showLoader, setShowLoader] = useState(false);
   const router = useRouter();
+  const [templateFile, setTemplateFile] = useState<File | null>(null);
 
   const [showCustomThemeModal, setShowCustomThemeModal] = useState(false);
   const [showDownloadModal, setShowDownloadModal] = useState(false);
@@ -174,9 +175,23 @@ const Header = ({
       setOpen(false);
       setShowLoader(true);
 
-      const apiBody = await metaData();
+      const pptxModelData = await metaData(); // This is what was previously apiBody
 
-      const response = await PresentationGenerationApi.exportAsPPTX(apiBody);
+      let response;
+      if (templateFile) {
+        const formData = new FormData();
+        formData.append("presentation_id", presentation_id); // presentation_id is already available in scope
+        formData.append("pptx_model", JSON.stringify(pptxModelData.pptx_model)); // pptx_model is part of what metaData returns
+        formData.append("template_file", templateFile);
+
+        // We'll need to adjust PresentationGenerationApi.exportAsPPTX to handle FormData
+        // For now, assuming it's adjusted or we'll create a new method for it.
+        response = await PresentationGenerationApi.exportAsPPTXWithTemplate(formData);
+
+      } else {
+        response = await PresentationGenerationApi.exportAsPPTX(pptxModelData);
+      }
+
       if (response.path) {
         const staticFileUrl = getStaticFileUrl(response.path);
         window.open(staticFileUrl, '_self');
@@ -250,6 +265,21 @@ const Header = ({
         <img src="/pptx.svg" alt="pptx export" width={30} height={30} />
         Export as PPTX
       </Button>
+      {!mobile && ( // Only show template upload for desktop PPTX export for now
+        <div className="mt-2">
+          <label htmlFor="template-upload" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            Use PPTX Template (Optional):
+          </label>
+          <input
+            id="template-upload"
+            type="file"
+            accept=".pptx"
+            onChange={(e) => setTemplateFile(e.target.files ? e.target.files[0] : null)}
+            className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100"
+          />
+          {templateFile && <p className="text-xs text-gray-500 mt-1">Selected: {templateFile.name}</p>}
+        </div>
+      )}
       <p className={`text-sm pt-3 border-t border-gray-300 ${mobile ? "border-none text-white font-semibold" : ""}`}>
         Font Used:
         <a className={`text-blue-500  flex items-center gap-1 ${mobile ? "mt-2 py-2 px-4 bg-white rounded-lg w-fit" : ""}`} href={getFontLink(currentColors.fontFamily).link || ''} target="_blank" rel="noopener noreferrer">

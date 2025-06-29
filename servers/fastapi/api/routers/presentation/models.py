@@ -106,6 +106,7 @@ class UpdatePresentationThemeRequest(BaseModel):
 class ExportAsRequest(BaseModel):
     presentation_id: str
     pptx_model: PptxPresentationModel
+    template_file: Optional[UploadFile] = None
 
 
 class DecomposeDocumentsResponse(BaseModel):
