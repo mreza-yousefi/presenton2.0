@@ -175,24 +175,45 @@ const Header = ({
       setOpen(false);
       setShowLoader(true);
 
-      const pptxModelData = await metaData(); // This is what was previously apiBody
+      // Step 1: Update presentation content on the backend
+      const updateBody = {
+        presentation_id: presentation_id,
+        slides: presentationData?.slides, // Assuming presentationData is from Redux and has the latest slides
+      };
+      await PresentationGenerationApi.updatePresentationContent(updateBody);
+      // console.log("Presentation content updated before fetching metadata for export.");
+
+      // Step 2: Fetch the PptxPresentationModel structure
+      const actualPptxPresentationModel = await getSlideMetadata();
+      // console.log("Fetched actualPptxPresentationModel for export:", actualPptxPresentationModel);
+
+      if (!actualPptxPresentationModel) {
+        toast({
+          title: "Error preparing presentation data",
+          description: "Could not fetch presentation model for export. Please try again.",
+          variant: "destructive",
+        });
+        setShowLoader(false);
+        return;
+      }
 
       let response;
       if (templateFile) {
         const formData = new FormData();
-        formData.append("presentation_id", presentation_id); // presentation_id is already available in scope
-        formData.append("pptx_model", JSON.stringify(pptxModelData.pptx_model)); // pptx_model is part of what metaData returns
+        formData.append("presentation_id", presentation_id);
+        formData.append("pptx_model", JSON.stringify(actualPptxPresentationModel));
         formData.append("template_file", templateFile);
 
-        // We'll need to adjust PresentationGenerationApi.exportAsPPTX to handle FormData
-        // For now, assuming it's adjusted or we'll create a new method for it.
         response = await PresentationGenerationApi.exportAsPPTXWithTemplate(formData);
-
       } else {
-        response = await PresentationGenerationApi.exportAsPPTX(pptxModelData);
+        const requestBodyForJson = {
+          presentation_id: presentation_id,
+          pptx_model: actualPptxPresentationModel, // Pass the fetched model directly
+        };
+        response = await PresentationGenerationApi.exportAsPPTX(requestBodyForJson);
       }
 
-      if (response.path) {
+      if (response && response.path) {
         const staticFileUrl = getStaticFileUrl(response.path);
         window.open(staticFileUrl, '_self');
       } else {
