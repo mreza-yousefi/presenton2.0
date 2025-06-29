@@ -205,8 +205,7 @@ class PptxPresentationCreator:
             populated_placeholder = False
             for placeholder in slide.placeholders:
                 if placeholder.placeholder_format.type == PP_PLACEHOLDER.CHART or \
-                   placeholder.placeholder_format.type == PP_PLACEHOLDER.OBJECT or \
-                   placeholder.placeholder_format.type == PP_PLACEHOLDER.CONTENT: # Content can also hold charts
+                   placeholder.placeholder_format.type == PP_PLACEHOLDER.OBJECT: # OBJECT can also hold charts
                     try:
                         if placeholder.shape_type == MSO_SHAPE_TYPE.PLACEHOLDER: # Ensure it's a placeholder
                             # Using insert_chart method for placeholders
@@ -413,7 +412,6 @@ class PptxPresentationCreator:
                                    placeholder.name.lower().startswith("content") or \
                                    placeholder.name.lower().startswith("text") or \
                                    placeholder.placeholder_format.type == PP_PLACEHOLDER.BODY or \
-                                   placeholder.placeholder_format.type == PP_PLACEHOLDER.CONTENT or \
                                    placeholder.placeholder_format.type == PP_PLACEHOLDER.OBJECT
                 if is_text_placeholder and (not placeholder.has_text_frame or placeholder.text_frame.text == ""):
                     # Check if this placeholder was already used by add_textbox (this is tricky without more state)
@@ -445,7 +443,6 @@ class PptxPresentationCreator:
                placeholder.name.lower().startswith("content") or \
                placeholder.name.lower().startswith("text") or \
                placeholder.placeholder_format.type == PP_PLACEHOLDER.BODY or \
-               placeholder.placeholder_format.type == PP_PLACEHOLDER.CONTENT or \
                placeholder.placeholder_format.type == PP_PLACEHOLDER.OBJECT: # OBJECT can also hold text
                 if not placeholder.has_text_frame or placeholder.text_frame.text == "":
                     textbox = placeholder.text_frame
