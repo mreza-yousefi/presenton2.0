@@ -635,16 +635,18 @@ class PptxPresentationCreator:
             print("Could not apply border radius.")
 
     def apply_fill_to_shape(self, shape: Shape, fill: Optional[PptxFillModel] = None):
-        if self._using_template: # If using a template, prefer template styles
-            if fill : # Only apply if a specific fill is requested, could be an override
-                print(f"Note: Applying explicit fill color {fill.color} even with template.")
-                shape.fill.solid()
-                shape.fill.fore_color.rgb = RGBColor.from_string(fill.color)
-            # else, do nothing, let template style prevail
+        if self._using_template:
+            # In template mode, do not apply programmatic fill. Let template/placeholder styles prevail.
+            # If a fill is provided in the model, it's an explicit override request,
+            # but for this stricter approach, we'll ignore it to ensure template fidelity.
+            # This can be relaxed later if needed.
+            # if fill:
+            #     print(f"Note (template mode): Fill color {fill.color} from model ignored. Using template style.")
             return
 
+        # Not using template: Apply fill from the model
         if not fill:
-            shape.fill.background()
+            shape.fill.background() # Make shape transparent if no fill model
         else:
             shape.fill.solid()
             shape.fill.fore_color.rgb = RGBColor.from_string(fill.color)
@@ -652,17 +654,15 @@ class PptxPresentationCreator:
     def apply_stroke_to_shape(
         self, shape: Shape, stroke: Optional[PptxStrokeModel] = None
     ):
-        if self._using_template: # If using a template, prefer template styles
-            if stroke and stroke.thickness > 0: # Only apply if a specific stroke is requested
-                print(f"Note: Applying explicit stroke even with template.")
-                shape.line.fill.solid()
-                shape.line.fill.fore_color.rgb = RGBColor.from_string(stroke.color)
-                shape.line.width = Pt(stroke.thickness)
-            # else, do nothing, let template style prevail
+        if self._using_template:
+            # In template mode, do not apply programmatic stroke. Let template/placeholder styles prevail.
+            # if stroke and stroke.thickness > 0:
+            #     print(f"Note (template mode): Stroke from model ignored. Using template style.")
             return
 
+        # Not using template: Apply stroke from the model
         if not stroke or stroke.thickness == 0:
-            shape.line.fill.background()
+            shape.line.fill.background() # No line
         else:
             shape.line.fill.solid()
             shape.line.fill.fore_color.rgb = RGBColor.from_string(stroke.color)
@@ -671,9 +671,13 @@ class PptxPresentationCreator:
     def apply_shadow_to_shape(
         self, shape: Shape, shadow: Optional[PptxShadowModel] = None
     ):
-        if self._using_template and not shadow: # If using a template and no explicit shadow, prefer template
+        if self._using_template:
+            # In template mode, do not apply programmatic shadow. Let template/placeholder styles prevail.
+            # if shadow:
+            #    print(f"Note (template mode): Shadow from model ignored. Using template style.")
             return
 
+        # Not using template: Apply shadow from the model (or remove existing if no shadow model)
         # Access the XML for the shape
         sp_element = shape._element
         sp_pr = sp_element.xpath("p:spPr")[0]  # Shape properties XML element
@@ -752,19 +756,13 @@ class PptxPresentationCreator:
         self.apply_font(paragraph.font, font)
 
     def apply_font(self, font: Font, font_model: PptxFontModel):
-        if self._using_template: # If using a template, prefer template font styles
-            # Potentially allow overrides if font_model has very specific non-default values
-            # For now, primarily rely on template. Could add verbose logging for overrides.
-            if font_model.name != "Inter" or font_model.color != "000000" or font_model.size != 16: # Example: if model requests specific non-default font
-                 print(f"Note: Applying specific font model ({font_model.name}, {font_model.size}pt, {font_model.color}) even with template.")
-                 font.name = font_model.name
-                 font.color.rgb = RGBColor.from_string(font_model.color)
-                 font.bold = font_model.bold
-                 font.italic = font_model.italic
-                 font.size = Pt(font_model.size)
-            # else, do nothing, let template style prevail for this run/paragraph.
+        if self._using_template:
+            # In template mode, do not apply programmatic font styles. Let template/placeholder styles prevail.
+            # Specific overrides could be re-introduced here later if absolutely necessary,
+            # but the default should be to defer to the template.
             return
 
+        # Not using template: Apply styles from the font_model
         font.name = font_model.name
         font.color.rgb = RGBColor.from_string(font_model.color)
         font.bold = font_model.bold
