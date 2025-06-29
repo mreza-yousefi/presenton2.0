@@ -273,7 +273,7 @@ const Header = ({
           <input
             id="template-upload"
             type="file"
-            accept=".pptx"
+            accept=".pptx,.potx"
             onChange={(e) => setTemplateFile(e.target.files ? e.target.files[0] : null)}
             className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100"
           />
