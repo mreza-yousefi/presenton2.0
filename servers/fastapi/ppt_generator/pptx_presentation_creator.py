@@ -202,28 +202,31 @@ class PptxPresentationCreator:
                 chart_type = XL_CHART_TYPE.PIE
 
         if chart_data:
-            populated_placeholder = False
-            for placeholder in slide.placeholders:
-                if placeholder.placeholder_format.type == PP_PLACEHOLDER.CHART or \
-                   placeholder.placeholder_format.type == PP_PLACEHOLDER.OBJECT: # OBJECT can also hold charts
-                    try:
-                        if placeholder.shape_type == MSO_SHAPE_TYPE.PLACEHOLDER: # Ensure it's a placeholder
-                            # Using insert_chart method for placeholders
-                            graphic_frame = placeholder.insert_chart(chart_type, chart_data)
-                            chart = graphic_frame.chart
-                            self.apply_graph_styles(chart, graph_box_model)
-                            populated_placeholder = True
-                            break
-                    except Exception as e:
-                        print(f"Could not insert chart into placeholder: {e}")
+            if self._using_template:
+                populated_placeholder = False
+                for placeholder in slide.placeholders:
+                    if placeholder.placeholder_format.type == PP_PLACEHOLDER.CHART or \
+                       placeholder.placeholder_format.type == PP_PLACEHOLDER.OBJECT: # OBJECT can also hold charts
+                        try:
+                            if placeholder.shape_type == MSO_SHAPE_TYPE.PLACEHOLDER:
+                                graphic_frame = placeholder.insert_chart(chart_type, chart_data)
+                                chart = graphic_frame.chart
+                                self.apply_graph_styles(chart, graph_box_model) # Styles applied after insertion
+                                populated_placeholder = True
+                                break
+                        except Exception as e:
+                            print(f"Could not insert chart into placeholder: {e}")
 
-            if not populated_placeholder:
-                print(f"Warning: Could not find suitable placeholder for chart. Adding as new shape. Type: {graph.type}")
-                # Fallback to original behavior
+                if not populated_placeholder:
+                    print(f"Warning (template mode): Could not find suitable placeholder for chart (Type: {graph.type}). Chart will be skipped.")
+                    # In template mode, if no placeholder, skip to preserve layout.
+
+            else: # Not self._using_template: Create the chart directly
+                # print(f"No template: Adding chart as new shape. Type: {graph.type}")
                 chart: Chart = slide.shapes.add_chart(
                     chart_type, *graph_box_model.position.to_pt_list(), chart_data
                 ).chart
-                self.apply_graph_styles(chart, graph_box_model)
+                self.apply_graph_styles(chart, graph_box_model) # Styles applied after creation
 
     def apply_graph_styles(self, chart, graph_box_model: PptxGraphBoxModel):
         graph = graph_box_model.graph
@@ -359,29 +362,35 @@ class PptxPresentationCreator:
             picture_model.position, picture_model.margin
         )
 
-        # Try to find and populate a picture placeholder
-        populated_placeholder = False
-        for placeholder in slide.placeholders:
-            if placeholder.name.lower().startswith("picture") or \
-               placeholder.placeholder_format.type == PP_PLACEHOLDER.PICTURE:
-                try:
-                    # Ensure placeholder is empty or can be replaced
-                    # Some placeholders might not be directly insertable or might have content
-                    if placeholder.shape_type == MSO_SHAPE_TYPE.PLACEHOLDER: # Check if it's a placeholder type
-                        placeholder = placeholder.insert_picture(image_path)
-                        populated_placeholder = True
-                        # TODO: Apply object_fit, border_radius etc. to the placeholder if possible.
-                        # This is more complex as placeholders behave differently than regular shapes.
-                        # For now, we rely on template styling for picture placeholders.
-                        break
-                except Exception as e:
-                    print(f"Could not insert picture into placeholder: {e}")
+        if self._using_template:
+            populated_placeholder = False
+            for placeholder in slide.placeholders:
+                if placeholder.name.lower().startswith("picture") or \
+                   placeholder.placeholder_format.type == PP_PLACEHOLDER.PICTURE:
+                    try:
+                        if placeholder.shape_type == MSO_SHAPE_TYPE.PLACEHOLDER:
+                            # Attempt to insert picture into the placeholder
+                            # Note: insert_picture replaces the placeholder shape with a picture shape
+                            placeholder.insert_picture(image_path)
+                            populated_placeholder = True
+                            # TODO: Consider if transformations (clip, overlay, etc.) from picture_model
+                            # should be applied to the new picture shape created by insert_picture.
+                            # This might be complex as it's now part of the placeholder's context.
+                            # For now, we assume the template placeholder's size/position is dominant.
+                            break
+                    except Exception as e:
+                        print(f"Could not insert picture into placeholder: {e}")
 
-        if not populated_placeholder:
-            print(f"Warning: Could not find a suitable empty placeholder for picture. Adding as new shape. Image: {image_path}")
-            # Fallback to original behavior if no suitable placeholder is found
+            if not populated_placeholder:
+                print(f"Warning (template mode): Could not find suitable placeholder for picture: {image_path}. Picture will be skipped.")
+                # In template mode, if no placeholder, we skip to avoid breaking layout.
+
+        else: # Not self._using_template: Create the picture directly
+            # print(f"No template: Adding picture as new shape: {image_path}")
             slide.shapes.add_picture(image_path, *margined_position.to_pt_list())
-
+            # Note: When adding directly, transformations like clip, overlay are handled by image preprocessing.
+            # Styling like borders or shadows would need explicit application if PptxPictureBoxModel supported them
+            # and if self.apply_... methods were called here for picture shapes. Currently, it doesn't.
 
     def add_autoshape(self, slide: Slide, autoshape_box_model: PptxAutoShapeBoxModel):
         position = autoshape_box_model.position
@@ -395,104 +404,117 @@ class PptxPresentationCreator:
         textbox = autoshape.text_frame
         textbox.word_wrap = autoshape_box_model.text_wrap
 
+        # Apply styles to the autoshape itself. These methods respect self._using_template.
         self.apply_fill_to_shape(autoshape, autoshape_box_model.fill)
-        self.apply_margin_to_text_box(textbox, autoshape_box_model.margin)
         self.apply_stroke_to_shape(autoshape, autoshape_box_model.stroke)
         self.apply_shadow_to_shape(autoshape, autoshape_box_model.shadow)
         self.apply_border_radius_to_shape(autoshape, autoshape_box_model.border_radius)
 
-        if autoshape_box_model.paragraphs:
-            self.add_paragraphs(textbox, autoshape_box_model.paragraphs)
-        # If the autoshape has text, try to populate a text placeholder if available
-        # This is a basic attempt and might need refinement
-        if autoshape_box_model.paragraphs:
-            text_placeholder_used_for_autoshape = False
-            for placeholder in slide.placeholders:
-                is_text_placeholder = placeholder.name.lower().startswith("body") or \
-                                   placeholder.name.lower().startswith("content") or \
-                                   placeholder.name.lower().startswith("text") or \
-                                   placeholder.placeholder_format.type == PP_PLACEHOLDER.BODY or \
-                                   placeholder.placeholder_format.type == PP_PLACEHOLDER.OBJECT
-                if is_text_placeholder and (not placeholder.has_text_frame or placeholder.text_frame.text == ""):
-                    # Check if this placeholder was already used by add_textbox (this is tricky without more state)
-                    # For now, we assume if it's empty, it's available.
-                    text_frame = placeholder.text_frame
-                    text_frame.clear()
-                    text_frame.word_wrap = autoshape_box_model.text_wrap
-                    self.apply_margin_to_text_box(text_frame, autoshape_box_model.margin) # Apply margin from autoshape model
-                    self.add_paragraphs(text_frame, autoshape_box_model.paragraphs)
-                    text_placeholder_used_for_autoshape = True
+        # Margin for text within the autoshape's text_frame
+        self.apply_margin_to_text_box(textbox, autoshape_box_model.margin)
 
-                    # Make the original autoshape invisible or very small if its text is moved
-                    # This prevents text duplication.
-                    autoshape.width = Pt(1)
-                    autoshape.height = Pt(1)
-                    autoshape.fill.background() # Make it transparent
-                    autoshape.line.fill.background() # No border
-                    break
-            if not text_placeholder_used_for_autoshape:
-                 # If no placeholder was found for the text, the text remains in the autoshape as originally designed.
-                pass
+        if autoshape_box_model.paragraphs:
+            if self._using_template:
+                # In template mode, try to move text to a placeholder
+                text_placeholder_used_for_autoshape_text = False
+                for placeholder in slide.placeholders:
+                    is_text_placeholder = placeholder.name.lower().startswith("body") or \
+                                       placeholder.name.lower().startswith("content") or \
+                                       placeholder.name.lower().startswith("text") or \
+                                       placeholder.placeholder_format.type == PP_PLACEHOLDER.BODY or \
+                                       placeholder.placeholder_format.type == PP_PLACEHOLDER.OBJECT
+                    if is_text_placeholder and (not placeholder.has_text_frame or placeholder.text_frame.text == ""):
+                        target_text_frame = placeholder.text_frame
+                        target_text_frame.clear()
+                        target_text_frame.word_wrap = autoshape_box_model.text_wrap # Use autoshape's wrap setting
+                        # Apply margin from autoshape_box_model to this placeholder's text_frame too, if desired
+                        self.apply_margin_to_text_box(target_text_frame, autoshape_box_model.margin)
+                        self.add_paragraphs(target_text_frame, autoshape_box_model.paragraphs)
+                        text_placeholder_used_for_autoshape_text = True
 
+                        # Make the original autoshape's text frame empty or shape invisible if text moved
+                        textbox.clear() # Clear text from original autoshape
+                        # Optionally make the shape itself invisible if it was purely a text container
+                        # autoshape.width = Pt(1)
+                        # autoshape.height = Pt(1)
+                        # autoshape.fill.background()
+                        # autoshape.line.fill.background()
+                        break
+
+                if not text_placeholder_used_for_autoshape_text:
+                    # Text stays in the autoshape if no suitable placeholder is found
+                    self.add_paragraphs(textbox, autoshape_box_model.paragraphs)
+                    print(f"Warning (template mode): No suitable placeholder for autoshape text. Text remains in autoshape.")
+
+            else: # Not self._using_template: Add paragraphs directly to the autoshape's text_frame
+                self.add_paragraphs(textbox, autoshape_box_model.paragraphs)
 
     def add_textbox(self, slide: Slide, textbox_model: PptxTextBoxModel):
-        populated_placeholder = False
-        # Attempt to find and populate a body placeholder
-        for placeholder in slide.placeholders:
-            if placeholder.name.lower().startswith("body") or \
-               placeholder.name.lower().startswith("content") or \
-               placeholder.name.lower().startswith("text") or \
-               placeholder.placeholder_format.type == PP_PLACEHOLDER.BODY or \
-               placeholder.placeholder_format.type == PP_PLACEHOLDER.OBJECT: # OBJECT can also hold text
-                if not placeholder.has_text_frame or placeholder.text_frame.text == "":
-                    textbox = placeholder.text_frame
-                    textbox.clear() # Clear any default text
-                    textbox.word_wrap = textbox_model.text_wrap
-                    # self.apply_fill_to_shape(placeholder.shape, textbox_model.fill) # Placeholder fill usually from template
-                    self.apply_margin_to_text_box(textbox, textbox_model.margin)
-                    self.add_paragraphs(textbox, textbox_model.paragraphs)
-                    populated_placeholder = True
-                    # Mark this placeholder as used (conceptually - actual tracking is complex)
-                    # For simplicity, we assume if it's filled now, it's "used" for this textbox_model
-                    break
+        if self._using_template:
+            populated_placeholder = False
+            # Attempt to find and populate a body placeholder
+            for placeholder in slide.placeholders:
+                if placeholder.name.lower().startswith("body") or \
+                   placeholder.name.lower().startswith("content") or \
+                   placeholder.name.lower().startswith("text") or \
+                   placeholder.placeholder_format.type == PP_PLACEHOLDER.BODY or \
+                   placeholder.placeholder_format.type == PP_PLACEHOLDER.OBJECT:
+                    if not placeholder.has_text_frame or placeholder.text_frame.text == "":
+                        textbox_frame = placeholder.text_frame
+                        textbox_frame.clear()
+                        textbox_frame.word_wrap = textbox_model.text_wrap
+                        # For placeholders, margin is typically part of the placeholder's design in the template.
+                        # Explicit fill is also usually avoided to let template styles prevail.
+                        self.apply_margin_to_text_box(textbox_frame, textbox_model.margin) # Still apply model's margin if specified
+                        self.add_paragraphs(textbox_frame, textbox_model.paragraphs)
+                        populated_placeholder = True
+                        break
 
-        if not populated_placeholder:
-            # Fallback: If no suitable placeholder is found or if all are filled,
-            # try to find a title placeholder if it's a short text.
-            is_likely_title = len(textbox_model.paragraphs) == 1 and \
-                              textbox_model.paragraphs[0].text_runs and \
-                              len(textbox_model.paragraphs[0].text_runs) == 1 and \
-                              len(textbox_model.paragraphs[0].text_runs[0].text) < 100
-
-            if is_likely_title:
-                for placeholder in slide.placeholders:
-                    if placeholder.name.lower().startswith("title") or \
-                       placeholder.placeholder_format.type == PP_PLACEHOLDER.TITLE or \
-                       placeholder.placeholder_format.type == PP_PLACEHOLDER.CENTER_TITLE:
-                        if not placeholder.has_text_frame or placeholder.text_frame.text == "":
-                            textbox = placeholder.text_frame
-                            textbox.clear()
-                            textbox.word_wrap = textbox_model.text_wrap
-                            self.add_paragraphs(textbox, textbox_model.paragraphs)
-                            populated_placeholder = True
-                            break
+            if not populated_placeholder: # If body placeholder wasn't found/used, try title
+                is_likely_title = len(textbox_model.paragraphs) == 1 and \
+                                  textbox_model.paragraphs[0].text_runs and \
+                                  len(textbox_model.paragraphs[0].text_runs) == 1 and \
+                                  len(textbox_model.paragraphs[0].text_runs[0].text) < 100
+                if is_likely_title:
+                    for placeholder in slide.placeholders:
+                        if placeholder.name.lower().startswith("title") or \
+                           placeholder.placeholder_format.type == PP_PLACEHOLDER.TITLE or \
+                           placeholder.placeholder_format.type == PP_PLACEHOLDER.CENTER_TITLE:
+                            if not placeholder.has_text_frame or placeholder.text_frame.text == "":
+                                textbox_frame = placeholder.text_frame
+                                textbox_frame.clear()
+                                textbox_frame.word_wrap = textbox_model.text_wrap
+                                # self.apply_margin_to_text_box(textbox_frame, textbox_model.margin) # Margins for title usually from template
+                                self.add_paragraphs(textbox_frame, textbox_model.paragraphs)
+                                populated_placeholder = True
+                                break
 
             if not populated_placeholder:
-                # Only print warning if there was actual text to add.
+                # In template mode, if no suitable placeholder is found, we skip adding this textbox
+                # to avoid breaking the template structure with arbitrarily placed new shapes.
                 has_text_to_add = any(p.text_runs and any(tr.text for tr in p.text_runs) for p in textbox_model.paragraphs)
-                if has_text_to_add:
-                    print(f"Warning: Could not find a suitable empty placeholder for textbox. Text: '{textbox_model.paragraphs[0].text_runs[0].text[:50]}...'")
-                # Original behavior (creating a new textbox) is commented out to prioritize template placeholders.
-                # If needed, this fallback can be reinstated.
-                # position = textbox_model.position
-                # textbox_shape = slide.shapes.add_textbox(*position.to_pt_list())
-                # textbox_shape.width += Pt(2)
-                # textbox = textbox_shape.text_frame
-                # textbox.word_wrap = textbox_model.text_wrap
-                # self.apply_fill_to_shape(textbox_shape, textbox_model.fill)
-                # self.apply_margin_to_text_box(textbox, textbox_model.margin)
-                # self.add_paragraphs(textbox, textbox_model.paragraphs)
+                # Check if there are paragraphs and text_runs to avoid index out of bounds
+                if has_text_to_add and textbox_model.paragraphs and \
+                   textbox_model.paragraphs[0].text_runs and \
+                   len(textbox_model.paragraphs[0].text_runs) > 0 and \
+                   textbox_model.paragraphs[0].text_runs[0].text:
+                    print(f"Warning (template mode): Could not find suitable placeholder for textbox. Text: '{textbox_model.paragraphs[0].text_runs[0].text[:50]}...' This content will be skipped.")
+                elif has_text_to_add:
+                     print(f"Warning (template mode): Could not find suitable placeholder for textbox with parsable text (possibly empty first run or no text_runs). This content will be skipped.")
 
+        else: # Not self._using_template: Create the textbox directly
+            position = textbox_model.position
+            new_textbox_shape = slide.shapes.add_textbox(*position.to_pt_list())
+            # new_textbox_shape.width += Pt(2) # Retained from original, though purpose can be reviewed.
+
+            textbox_frame = new_textbox_shape.text_frame
+            textbox_frame.word_wrap = textbox_model.text_wrap
+
+            # Apply styles directly as we are not in template mode
+            # These apply_ methods will use their non-template paths because self._using_template is False
+            self.apply_fill_to_shape(new_textbox_shape, textbox_model.fill)
+            self.apply_margin_to_text_box(textbox_frame, textbox_model.margin)
+            self.add_paragraphs(textbox_frame, textbox_model.paragraphs)
 
     def add_paragraphs(
         self, textbox: TextFrame, paragraph_models: List[PptxParagraphModel]
