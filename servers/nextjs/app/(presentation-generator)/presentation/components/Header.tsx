@@ -198,20 +198,16 @@ const Header = ({
       }
 
       let response;
-      if (templateFile) {
-        const formData = new FormData();
-        formData.append("presentation_id", presentation_id);
-        formData.append("pptx_model", JSON.stringify(actualPptxPresentationModel));
-        formData.append("template_file", templateFile);
+      const formData = new FormData();
+      formData.append("presentation_id", presentation_id);
+      formData.append("pptx_model", JSON.stringify(actualPptxPresentationModel));
 
-        response = await PresentationGenerationApi.exportAsPPTXWithTemplate(formData);
-      } else {
-        const requestBodyForJson = {
-          presentation_id: presentation_id,
-          pptx_model: actualPptxPresentationModel, // Pass the fetched model directly
-        };
-        response = await PresentationGenerationApi.exportAsPPTX(requestBodyForJson);
+      if (templateFile) {
+        formData.append("template_file", templateFile);
       }
+
+      // Always use the FormData endpoint
+      response = await PresentationGenerationApi.exportAsPPTXWithTemplate(formData);
 
       if (response && response.path) {
         const staticFileUrl = getStaticFileUrl(response.path);
