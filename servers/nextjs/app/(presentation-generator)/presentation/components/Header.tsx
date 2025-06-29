@@ -183,24 +183,39 @@ const Header = ({
       await PresentationGenerationApi.updatePresentationContent(updateBody);
       // console.log("Presentation content updated before fetching metadata for export.");
 
-      // Step 2: Fetch the PptxPresentationModel structure
-      const actualPptxPresentationModel = await getSlideMetadata();
-      // console.log("Fetched actualPptxPresentationModel for export:", actualPptxPresentationModel);
+      // Step 2: Fetch the data object which should contain PptxPresentationModel
+      const dataFromGetSlideMetadata = await getSlideMetadata();
+      // console.log("Fetched dataFromGetSlideMetadata for export:", dataFromGetSlideMetadata);
 
-      if (!actualPptxPresentationModel) {
+      if (!dataFromGetSlideMetadata || typeof dataFromGetSlideMetadata !== 'object') {
         toast({
           title: "Error preparing presentation data",
-          description: "Could not fetch presentation model for export. Please try again.",
+          description: "Could not fetch valid presentation data structure for export. Please try again.",
           variant: "destructive",
         });
         setShowLoader(false);
         return;
       }
 
+      const pptxModelPayload = dataFromGetSlideMetadata.pptx_model;
+
+      if (!pptxModelPayload) {
+        console.error("Error: pptx_model key is missing from getSlideMetadata response object.", dataFromGetSlideMetadata);
+        toast({
+          title: "Error preparing presentation data",
+          description: "Essential presentation model data (pptx_model) is missing from the fetched data. Cannot export.",
+          variant: "destructive",
+        });
+        setShowLoader(false);
+        return;
+      }
+
+      // console.log("Stringifying this for 'pptx_model' form field:", pptxModelPayload);
+
       let response;
       const formData = new FormData();
       formData.append("presentation_id", presentation_id);
-      formData.append("pptx_model", JSON.stringify(actualPptxPresentationModel));
+      formData.append("pptx_model", JSON.stringify(pptxModelPayload)); // Stringify the extracted payload
 
       if (templateFile) {
         formData.append("template_file", templateFile);
