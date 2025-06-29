@@ -61,6 +61,7 @@ class PptxPresentationCreator:
 
     def __init__(self, ppt_model: PptxPresentationModel, temp_dir: str, template_path: Optional[str] = None):
         self._temp_dir = temp_dir
+        self._using_template = False # Initialize the flag
 
         self._ppt_model = ppt_model
         self._slide_models = ppt_model.slides
@@ -70,11 +71,14 @@ class PptxPresentationCreator:
         if template_path:
             try:
                 self._ppt = Presentation(template_path)
+                self._using_template = True # Set flag if template is loaded
             except Exception as e:
                 print(f"Error loading template: {e}. Creating a new presentation instead.")
                 self._ppt = Presentation()
+                # self._using_template remains False
         else:
             self._ppt = Presentation()
+            # self._using_template remains False
 
         self._ppt.slide_width = Pt(1280)
         self._ppt.slide_height = Pt(720)
@@ -138,7 +142,7 @@ class PptxPresentationCreator:
 
         slide = self._ppt.slides.add_slide(slide_layout)
 
-        if self._slide_fill and not self._ppt.template: # Only apply background fill if not using a template
+        if self._slide_fill and not self._using_template: # Use the new flag
             self.apply_fill_to_shape(slide.background, self._slide_fill)
 
         for shape_model in slide_model.shapes:
@@ -612,7 +616,7 @@ class PptxPresentationCreator:
             print("Could not apply border radius.")
 
     def apply_fill_to_shape(self, shape: Shape, fill: Optional[PptxFillModel] = None):
-        if self._ppt.template: # If using a template, prefer template styles
+        if self._using_template: # If using a template, prefer template styles
             if fill : # Only apply if a specific fill is requested, could be an override
                 print(f"Note: Applying explicit fill color {fill.color} even with template.")
                 shape.fill.solid()
@@ -629,7 +633,7 @@ class PptxPresentationCreator:
     def apply_stroke_to_shape(
         self, shape: Shape, stroke: Optional[PptxStrokeModel] = None
     ):
-        if self._ppt.template: # If using a template, prefer template styles
+        if self._using_template: # If using a template, prefer template styles
             if stroke and stroke.thickness > 0: # Only apply if a specific stroke is requested
                 print(f"Note: Applying explicit stroke even with template.")
                 shape.line.fill.solid()
@@ -648,7 +652,7 @@ class PptxPresentationCreator:
     def apply_shadow_to_shape(
         self, shape: Shape, shadow: Optional[PptxShadowModel] = None
     ):
-        if self._ppt.template and not shadow: # If using a template and no explicit shadow, prefer template
+        if self._using_template and not shadow: # If using a template and no explicit shadow, prefer template
             return
 
         # Access the XML for the shape
@@ -729,7 +733,7 @@ class PptxPresentationCreator:
         self.apply_font(paragraph.font, font)
 
     def apply_font(self, font: Font, font_model: PptxFontModel):
-        if self._ppt.template: # If using a template, prefer template font styles
+        if self._using_template: # If using a template, prefer template font styles
             # Potentially allow overrides if font_model has very specific non-default values
             # For now, primarily rely on template. Could add verbose logging for overrides.
             if font_model.name != "Inter" or font_model.color != "000000" or font_model.size != 16: # Example: if model requests specific non-default font
